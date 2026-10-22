@@ -424,11 +424,16 @@ function normalizeQ(q,i){
   let type=g2(q,'type','题型');
   const options=g2(q,'options','选项');
   const answer=g2(q,'answer','答案');
-  if(!type)type=(Array.isArray(options)&&options.length)?'hazard':'judge';
+  if(type==null||type==='')type='';
   type=String(type);
   if(/判断|judge|tf/i.test(type))type='judge';
-  else if(/危险|hazard|选择|choice|multi/i.test(type))type='hazard';
-  else type=(Array.isArray(options)&&options.length)?'hazard':'judge';
+  else if(/单选|choice|radio/i.test(type))type='choice';
+  else if(/危险|hazard|多选|multi/i.test(type))type='hazard';
+  else if(Array.isArray(options)&&options.length){
+    const nOk=options.filter(o=>normAns(o&&(o.answer!==undefined?o.answer:o['答案']))==='正确').length;
+    type=(nOk===1)?'choice':'hazard';
+  }
+  else type='judge';
   const imgsRaw=g2(q,'images','图片文件','image','图片');
   let images=[];
   if(Array.isArray(imgsRaw))images=imgsRaw.filter(Boolean).map(String);
@@ -442,6 +447,7 @@ function normalizeQ(q,i){
     question:String(g2(q,'question','题目','题干')||''),
     images:images,
     answer:normAns(answer),
+    audio:String(g2(q,'audio','音频')||''),
     explanation:String(g2(q,'explanation','解析')||''),
     note:String(g2(q,'note','备注','笔记')||'')
   };
@@ -454,6 +460,18 @@ function normalizeQ(q,i){
     });
     if(!opts.length)return null;
     n.options=opts;
+  }
+  if(type==='choice'){
+    const opts=[];
+    (Array.isArray(options)?options:[]).forEach((o,oi)=>{
+      const text=g2(o,'text','内容','选项','desc');
+      if(text==null||String(text).trim()==='')return;
+      opts.push({no:(o&&(o.no!=null))?o.no:oi+1,text:String(text),answer:normAns(o&&(o.answer!==undefined?o.answer:o['答案'])),explanation:String(g2(o,'explanation','解析')||'')});
+    });
+    if(opts.length<2)return null;
+    n.options=opts;
+    const cor=opts.find(o=>o.answer==='正确');
+    n.answer=cor?cor.text:(n.answer||'');
   }
   if(!n.question&&!n.images.length)return null;
   return n;
@@ -783,6 +801,24 @@ function judgeBtns(q,mode,st,act){
     '<button class="ansbtn '+cls('错误')+'" data-act="'+act+'" data-v="错误" '+((locked||mode==='review')?'disabled':'')+'>× 错误</button>'+
   '</div>';
 }
+function choiceBtns(q,mode,st,act){
+  const locked=st.locked;
+  const ua=mode==='exam'?st.ua:(st.v!=null?st.v:null);
+  return '<div class="opts">'+q.options.map((o,i)=>{
+    const isAns=o.answer==='正确';
+    const picked=ua===o.text;
+    let badge='';
+    if(mode==='review'){
+      badge='<span class="obadge '+(isAns?'on':'')+'">'+(isAns?'○ 正确答案':'× 错误')+'</span>'+(picked?'<span class="obadge '+(isAns?'gok':'gbad')+'">'+(isAns?'✓ 我选了':'✗ 我选了')+'</span>':'');
+    }else if(locked){
+      badge='<span class="obadge '+(isAns?'on':'')+'">'+(isAns?'○ 答案':'× 错误')+'</span>'+(picked?'<span class="obadge '+(isAns?'gok':'gbad')+'">我的选择</span>':'');
+    }else{
+      badge='<span class="obadge '+(picked?'on':'')+'">'+(picked?'✓ 已选':'○ 点击选择')+'</span>';
+    }
+    const clickable=(mode==='ask'||mode==='exam')&&!locked;
+    return '<div class="opt'+(clickable?' opttoggle':'')+(clickable&&picked?' selopt':'')+'"'+(clickable?' data-act="'+act+'" data-v="'+esc(o.text)+'" role="button" tabindex="0"':'')+'><div class="optrow"><div class="opttext"><b>'+(i+1)+'.</b> '+esc(o.text)+'</div>'+badge+'</div></div>';
+  }).join('')+'</div>';
+}
 function optRow(q,o,i,mode,st,act){
   const locked=st.locked;
   const selArr=mode==='exam'?st.ua:st.arr;
@@ -812,26 +848,31 @@ function cardHTML(q,mode,st){
   st=st||{};
   let h='<div class="qmeta"><span class="chip chip-id">'+esc(q.id)+'</span>'+
     (q.source?'<span class="chip" title="'+esc(sourceName(q.source))+'">'+esc(q.source)+'</span>':'')+
-    '<span class="chip chip-t">'+(q.type==='judge'?'判断题':'危险预测')+'</span>'+
+    '<span class="chip chip-t">'+(q.type==='judge'?'判断题':(q.type==='choice'?'单选题':'危险预测'))+'</span>'+
     (marks[q.id]?'<span class="chip chip-mark">★ 蒙题</span>':'')+
     (issues[q.id]?'<span class="chip chip-mark">⚠️ 已标误</span>':'')+'</div>';
   let imgs='';
   (q.images||[]).forEach((p,i)=>{imgs+=imgHTML(q,i)});
   if(q.images&&q.images.length)imgs+='<div class="imgctl"><button class="btn small" data-act="img-boost">🔍 对比度增强：'+BOOST_LABELS[settings.imgBoost||0]+'</button></div>';
   let body='';
+  const audioTag=q.audio?'<audio controls preload="metadata" style="width:100%;margin-bottom:8px" src="'+esc(q.audio)+'"></audio>':'';
   if(mode==='peek'){
     if(q.type==='judge'){
       body+='<div class="verdict" style="background:var(--chipbg);color:var(--ink)">答案：<b>'+esc(q.answer)+'</b></div>';
     }else{
       body+='<div class="opts">'+q.options.map((o,i)=>'<div class="opt"><div class="optrow"><div class="opttext"><b>'+(i+1)+'.</b> '+esc(o.text)+'</div><span class="obadge '+(o.answer==='正确'?'on':'')+'">答案：'+(o.answer==='正确'?'○ 正确':'× 错误')+'</span></div>'+(o.explanation?'<div class="optfb g">'+esc(o.explanation)+'</div>':'')+'</div>').join('')+'</div>';
     }
+    body=audioTag+body;
     body+=explHTML(q);
     h+='<div class="'+((q.images&&q.images.length)?'splitwrap':'')+'"><div class="cimg">'+imgs+'</div><div class="cbody">'+body+'</div></div>';
     return h;
   }
+  body+=audioTag;
   if(q.question)body+='<div class="qtext">'+esc(q.question)+'</div>';
   if(q.type==='judge'){
     body+=judgeBtns(q,mode,st,mode==='exam'?'ex-judge':'p-judge');
+  }else if(q.type==='choice'){
+    body+=choiceBtns(q,mode,st,mode==='exam'?'ex-choice':'p-choice');
   }else{
     body+='<div class="opts">'+q.options.map((o,i)=>optRow(q,o,i,mode,st,mode==='exam'?'ex-opt':'p-opt')).join('')+'</div>';
     if(mode==='ask'&&!st.locked){
@@ -918,7 +959,12 @@ function psShow(){
     foot='<div class="actionbar"><button class="btn pri" data-act="p-next">'+(PS.idx+1>=PS.qs.length?'查看结果 →':'下一题 →')+'</button></div>';
   }
   $('#app').innerHTML=head+'<div class="card">'+cardHTML(q,'ask',st)+
-    (PS.locked?(q.type==='judge'?fbJudge(q):fbHazard(q)):'')+foot+'<div class="kbhint">'+KBHINT_ASK+'</div></div>';
+    (PS.locked?(q.type==='hazard'?fbHazard(q):fbJudge(q)):'')+foot+'<div class="kbhint">'+kbHint(q,false)+'</div></div>';
+}
+function kbHint(q,examMode){
+  if(q.type==='choice')return examMode?'<b>1-4</b> 选择答案 · <b>←/→</b> 切题 · <b>F</b> 标记 · <b>P</b> 答题卡 · <b>S</b> 交卷':'<b>1-4</b> 选择答案 · <b>Enter/空格</b> 下一题 · <b>F</b> 蒙题标记';
+  if(q.type==='judge')return examMode?'<b>1/2</b> 判断对错 · <b>←/→</b> 切题 · <b>F</b> 标记 · <b>P</b> 答题卡 · <b>S</b> 交卷':'<b>1/2</b> 判断对错 · <b>Enter/空格</b> 下一题 · <b>F</b> 蒙题标记';
+  return examMode?KBHINT_EXAM:KBHINT_ASK;
 }
 function fbJudge(q){
   const ok=PS.v===q.answer;
@@ -1042,7 +1088,7 @@ function exStart(){
   randShuffle(pool);
   const qs=pool.slice(0,f.count);
   const ans={};
-  qs.forEach(q=>{ans[q.id]=q.type==='judge'?null:q.options.map(()=>null)});
+  qs.forEach(q=>{ans[q.id]=q.type==='hazard'?q.options.map(()=>null):null});
   settings.examCount=f.count;settings.examMin=f.min;settings.ef={src:f.src,typ:f.typ,form:f.form,range:f.range,count:f.count,min:f.min};lsSet('settings',settings);udataPush();
   EX={qs:qs,idx:0,ans:ans,flags:new Set(),endAt:Date.now()+f.min*60000,cfg:f,startTs:Date.now(),result:null,reviewOnly:false};
   EX.timer=setInterval(exTick,500);
@@ -1061,7 +1107,7 @@ function exTick(){
 }
 function exAnswered(q){
   const ua=EX.ans[q.id];
-  if(q.type==='judge')return ua!=null;
+  if(q.type==='judge'||q.type==='choice')return ua!=null;
   return !!ua&&ua.some(v=>v===true);
 }
 function exAnsweredCount(){return EX.qs.filter(q=>exAnswered(q)).length}
@@ -1079,7 +1125,7 @@ function exRender(){
     '<div class="actionbar">'+
     '<button class="btn" data-act="ex-prev" '+(EX.idx===0?'disabled':'')+'>← 上一题</button>'+
     '<button class="btn pri" data-act="ex-next" '+(EX.idx+1>=EX.qs.length?'disabled':'')+'>下一题 →</button></div>'+
-    '<div class="kbhint">'+KBHINT_EXAM+'</div>';
+    '<div class="kbhint">'+(EX.qs[EX.idx]?kbHint(EX.qs[EX.idx],true):KBHINT_EXAM)+'</div>';
   exSave();
   exTick();
 }
@@ -1119,8 +1165,8 @@ function exSubmit(auto){
     const per=EX.qs.map(q=>{
       const ua=EX.ans[q.id];
       let ok;
-      if(q.type==='judge')ok=ua!=null&&ua===q.answer;
-      else ok=!!ua&&q.options.every((o,i)=>(ua[i]===true)===(o.answer==='正确'));
+      if(q.type==='hazard')ok=!!ua&&q.options.every((o,i)=>(ua[i]===true)===(o.answer==='正确'));
+      else ok=ua!=null&&ua===q.answer;
       recordAnswer(q.id,ok,{});
       return {q:q,ua:ua,ok:ok};
     });
@@ -1164,7 +1210,7 @@ function exResult(){
      return '<div class="card" id="rv-'+esc(q.id)+'">'+
        '<div class="qmeta"><span class="chip chip-id">'+esc(q.id)+'</span><span class="chip '+(judgeOK?'':'')+'" style="'+(judgeOK?'background:#e8f6ee;color:#16a34a':'background:#fdecec;color:#dc2626')+'">'+(judgeOK?'✓ 正确':'✗ 错误')+'</span></div>'+
        cardHTML(q,'review',{ua:x.ua})+
-       (q.type==='judge'?('<div class="verdict '+(judgeOK?'v-ok':'v-bad')+'" style="margin-top:10px">'+(judgeOK?'✅ 回答正确':'❌ 回答错误')+'　你的答案：<b>'+esc(x.ua==null?'未作答':x.ua)+'</b> · 正确答案：<b>'+esc(q.answer)+'</b></div>'):(''))+
+       (q.type!=='hazard'?('<div class="verdict '+(judgeOK?'v-ok':'v-bad')+'" style="margin-top:10px">'+(judgeOK?'✅ 回答正确':'❌ 回答错误')+'　你的答案：<b>'+esc(x.ua==null?'未作答':x.ua)+'</b> · 正确答案：<b>'+esc(q.answer)+'</b></div>'):(''))+
        explHTML(q)+'</div>';
    }).join('');
 }
@@ -1254,7 +1300,7 @@ VIEWS.practice=function(root){
   root.innerHTML=
    '<div class="card"><h3>随机模拟练习</h3><p class="small mut" style="margin:4px 0 12px">随机顺序作答，每题立刻显示答案与解析，做错的题自动进入错题本。危险预测题：勾选你认为正确的选项，未勾选的按「×」判定。</p>'+
    '<div class="fgrp"><label class="f">来源</label><select id="p-src">'+srcOpts+'</select></div>'+
-   '<div class="fgrp"><label class="f">题型</label><select id="p-typ"><option value=""'+(!pf.typ?' selected':'')+'>全部题型</option><option value="judge"'+(pf.typ==='judge'?' selected':'')+'>判断题</option><option value="hazard"'+(pf.typ==='hazard'?' selected':'')+'>危险预测</option></select></div>'+
+   '<div class="fgrp"><label class="f">题型</label><select id="p-typ"><option value=""'+(!pf.typ?' selected':'')+'>全部题型</option><option value="judge"'+(pf.typ==='judge'?' selected':'')+'>判断题</option><option value="choice"'+(pf.typ==='choice'?' selected':'')+'>单选题</option><option value="hazard"'+(pf.typ==='hazard'?' selected':'')+'>危险预测</option></select></div>'+
    '<div class="fgrp"><label class="f">题目形式</label><select id="p-form"><option value=""'+(!pf.form?' selected':'')+'>图片题 + 纯文字题</option><option value="img"'+(pf.form==='img'?' selected':'')+'>只看图片题</option><option value="text"'+(pf.form==='text'?' selected':'')+'>只看纯文字题</option></select></div>'+
    '<div class="fgrp"><label class="f">知识点</label><select id="p-tag"><option value=""'+(!pf.tag?' selected':'')+'>不限</option>'+TAG_RULES.map(function(r){return '<option value="'+esc(r[0])+'"'+(pf.tag===r[0]?' selected':'')+'>'+esc(r[0])+'</option>'}).join('')+'</select></div>'+
    '<div class="fgrp"><label class="f">范围</label><select id="p-range"><option value=""'+(!pf.range?' selected':'')+'>全部题目</option><option value="new"'+(pf.range==='new'?' selected':'')+'>只练没做过的</option><option value="wrong"'+(pf.range==='wrong'?' selected':'')+'>错题本（'+wrongN+'）</option><option value="marked"'+(pf.range==='marked'?' selected':'')+'>蒙题标记（'+markedN+'）</option></select></div>'+
@@ -1276,7 +1322,7 @@ VIEWS.examsetup=function(root){
    '<button class="btn small" data-act="ex-preset" data-n="95" data-m="45">全真 95题/45分钟</button></div>'+
    '<div class="setgrid">'+
    '<div class="fgrp"><label class="f">来源</label><select id="ex-src">'+srcOpts+'</select></div>'+
-   '<div class="fgrp"><label class="f">题型</label><select id="ex-typ"><option value=""'+(!ef.typ?' selected':'')+'>全部题型</option><option value="judge"'+(ef.typ==='judge'?' selected':'')+'>判断题</option><option value="hazard"'+(ef.typ==='hazard'?' selected':'')+'>危险预测</option></select></div>'+
+   '<div class="fgrp"><label class="f">题型</label><select id="ex-typ"><option value=""'+(!ef.typ?' selected':'')+'>全部题型</option><option value="judge"'+(ef.typ==='judge'?' selected':'')+'>判断题</option><option value="choice"'+(ef.typ==='choice'?' selected':'')+'>单选题</option><option value="hazard"'+(ef.typ==='hazard'?' selected':'')+'>危险预测</option></select></div>'+
    '<div class="fgrp"><label class="f">题目形式</label><select id="ex-form"><option value=""'+(!ef.form?' selected':'')+'>图片题 + 纯文字题</option><option value="img"'+(ef.form==='img'?' selected':'')+'>只看图片题</option><option value="text"'+(ef.form==='text'?' selected':'')+'>只看纯文字题</option></select></div>'+
    '<div class="fgrp"><label class="f">范围</label><select id="ex-range"><option value=""'+(!ef.range?' selected':'')+'>全部题目</option><option value="weak"'+(ef.range==='weak'?' selected':'')+'>只考错题与未做过</option></select></div>'+
    '<div class="fgrp"><label class="f">题目数量</label><input type="number" id="ex-count" min="1" max="'+BANK.questions.length+'" value="'+(ef.count||settings.examCount)+'"></div>'+
@@ -1318,7 +1364,7 @@ VIEWS.bank=function(root){
   }).join('');
   const match=impMatchCount();
   root.innerHTML=
-   '<div class="card"><h3>当前题库</h3><p class="small mut">'+esc(BANK.name)+' · '+BANK.questions.length+' 题（判断题 '+BANK.questions.filter(q=>q.type==='judge').length+' / 危险预测 '+BANK.questions.filter(q=>q.type==='hazard').length+'）</p>'+
+   '<div class="card"><h3>当前题库</h3><p class="small mut">'+esc(BANK.name)+' · '+BANK.questions.length+' 题（判断题 '+BANK.questions.filter(q=>q.type==='judge').length+' / 单选题 '+BANK.questions.filter(q=>q.type==='choice').length+' / 危险预测 '+BANK.questions.filter(q=>q.type==='hazard').length+'）</p>'+
    '<div class="divider"></div>'+srcRows+
    (missing?'<p class="hint" style="color:var(--ng)">⚠️ 有 '+missing+' 张图片未匹配到（缺少图片的题仍可练习文字部分）</p>':'')+
    '</div>'+
@@ -1471,9 +1517,12 @@ function searchListHTML(){
   let pool=BANK.questions;
   if(SRCH.ans){
     pool=pool.filter(function(q){
-      if(q.type==='judge')return q.answer===SRCH.ans;
-      const allOk=q.options.every(function(o){return o.answer==='正确'});
-      return SRCH.ans==='正确'?allOk:!allOk;
+      if(q.type==='hazard'){
+        const allOk=q.options.every(function(o){return o.answer==='正确'});
+        return SRCH.ans==='正确'?allOk:!allOk;
+      }
+      if(q.type==='choice')return true;
+      return q.answer===SRCH.ans;
     });
   }
   let res=pool;
@@ -1487,7 +1536,7 @@ function searchListHTML(){
   if(!res.length)return '<p class="hint center">没有找到匹配的题目</p>';
   return '<p class="small mut">共 '+res.length+' 题'+(res.length>=50?'（仅显示前 50）':'')+'</p>'+
     res.slice(0,50).map(function(q){
-      return '<div class="wrongrow"><div class="t" data-act="search-open" data-q="'+esc(q.id)+'"><b>'+esc(q.question||q.id)+'</b><span>'+esc(q.id)+' · 答案：'+esc(q.type==='judge'?q.answer:(q.options.filter(function(o){return o.answer==='正确'}).length+' 个正确选项'))+'</span></div><button class="btn small" data-act="search-open" data-q="'+esc(q.id)+'">查看</button></div>';
+      return '<div class="wrongrow"><div class="t" data-act="search-open" data-q="'+esc(q.id)+'"><b>'+esc(q.question||q.id)+'</b><span>'+esc(q.id)+' · 答案：'+esc(q.type==='hazard'?(q.options.filter(function(o){return o.answer==='正确'}).length+' 个正确选项'):(q.answer||''))+'</span></div><button class="btn small" data-act="search-open" data-q="'+esc(q.id)+'">查看</button></div>';
     }).join('');
 }
 const TAG_RULES=[
@@ -1665,7 +1714,7 @@ VIEWS.examhist=function(root){
     per.map(function(x){
       return '<div class="card"><div class="qmeta"><span class="chip chip-id">'+esc(x.q.id)+'</span><span class="chip" style="'+(x.ok?'background:var(--ok-soft);color:var(--ok)':'background:var(--ng-soft);color:var(--ng)')+'">'+(x.ok?'✓ 正确':'✗ 错误')+'</span></div>'+
         cardHTML(x.q,'review',{ua:x.ua})+
-        (x.q.type==='judge'?('<div class="verdict '+(x.ok?'v-ok':'v-bad')+'" style="margin-top:10px">'+(x.ok?'✅ 回答正确':'❌ 回答错误')+'　你的答案：<b>'+esc(x.ua==null?'未作答':x.ua)+'</b> · 正确答案：<b>'+esc(x.q.answer)+'</b></div>'):(''))+
+        (x.q.type!=='hazard'?('<div class="verdict '+(x.ok?'v-ok':'v-bad')+'" style="margin-top:10px">'+(x.ok?'✅ 回答正确':'❌ 回答错误')+'　你的答案：<b>'+esc(x.ua==null?'未作答':x.ua)+'</b> · 正确答案：<b>'+esc(x.q.answer)+'</b></div>'):(''))+
         explHTML(x.q)+'</div>';
     }).join('');
 };
@@ -1699,6 +1748,9 @@ function runSelfTest(){
   t('normalizeQ 危险预测选项',function(){return normalizeQ({question:'x',type:'hazard',options:[{text:'a',answer:'正确'},{text:'b',answer:'错误'},{text:'c',answer:'错误'}]},0).options.length===3});
   t('seededShuffle 确定',function(){const a=seededShuffle([1,2,3,4,5],42),b=seededShuffle([1,2,3,4,5],42);return a.join()===b.join()&&a.length===5});
   t('qTags 命中',function(){return qTags({question:'在高速公路上超车'}).indexOf('高速公路')>=0});
+  t('normalizeQ 单选题推断与答案提取',function(){const n=normalizeQ({question:'x',options:[{text:'甲',answer:'错误'},{text:'乙',answer:'正确'},{text:'丙',answer:'错误'},{text:'丁',answer:'错误'}]},0);return n.type==='choice'&&n.answer==='乙'});
+  t('normalizeQ 多选项推断为危险预测',function(){const n=normalizeQ({question:'x',options:[{text:'a',answer:'正确'},{text:'b',answer:'正确'},{text:'c',answer:'错误'}]},0);return n.type==='hazard'});
+  t('normalizeQ 音频字段保留',function(){const n=normalizeQ({question:'x',answer:'对',audio:'data:audio/mpeg;base64,AAA'},0);return n.audio==='data:audio/mpeg;base64,AAA'});
   t('遗忘曲线 新错安排次日',function(){const bk=srs;srs={};srsAddWrong('T1');const ok=srs.T1&&srs.T1.s===0&&srs.T1.d===addDaysStr(todayStr(),1);srs=bk;return ok});
   t('遗忘曲线 答对顺延',function(){const bk=srs;srs={};srs.T1={s:0,d:addDaysStr(todayStr(),1)};srsOnAnswer('T1',true);const ok=srs.T1&&srs.T1.s===1;srs=bk;return ok});
   t('遗忘曲线 毕业移除',function(){const bk=srs;srs={};srs.T1={s:4,d:addDaysStr(todayStr(),1)};srsOnAnswer('T1',true);const ok=!srs.T1;srs=bk;return ok});
@@ -1736,12 +1788,14 @@ document.addEventListener('click',e=>{
     case 'p-mark':{const q=psQ();if(marks[q.id]){delete marks[q.id];toast('已取消蒙题标记')}else{marks[q.id]=Date.now();toast('已标记为蒙题，可在随机模拟 → 范围里重练')}saveMarks();psShow();break}
     case 'img-boost':{settings.imgBoost=((settings.imgBoost||0)+1)%4;lsSet('settings',settings);toast('对比度增强：'+BOOST_LABELS[settings.imgBoost]+'（对全部图片生效）');render();break}
     case 'p-judge':pJudge(el,el.dataset.v);break;
+    case 'p-choice':pJudge(el,el.dataset.v);break;
     case 'p-opt':pOpt(+el.dataset.i);break;
     case 'p-hsub':pHsub();break;
     case 'p-next':pNext();break;
     case 'ex-begin':exStart();break;
     case 'ex-preset':{if($('#ex-count'))$('#ex-count').value=el.dataset.n;if($('#ex-min'))$('#ex-min').value=el.dataset.m;break}
     case 'ex-judge':exJudge(el.dataset.v);break;
+    case 'ex-choice':exJudge(el.dataset.v);break;
     case 'ex-opt':exOpt(+el.dataset.i);break;
     case 'ex-prev':exJump(EX.idx-1);break;
     case 'ex-next':exJump(EX.idx+1);break;
@@ -1825,6 +1879,9 @@ document.addEventListener('keydown',e=>{
     if(q.type==='judge'){
       if(e.key==='1'||e.key==='o'||e.key==='O'){exJudge('正确');e.preventDefault();return}
       if(e.key==='2'||e.key==='x'||e.key==='X'){exJudge('错误');e.preventDefault();return}
+    }else if(q.type==='choice'){
+      const n=parseInt(e.key,10);
+      if(n>=1&&n<=q.options.length){exJudge(q.options[n-1].text);e.preventDefault();return}
     }else{
       const n=parseInt(e.key,10);
       if(n>=1&&n<=q.options.length){exOpt(n-1);e.preventDefault();return}
@@ -1841,6 +1898,9 @@ document.addEventListener('keydown',e=>{
     if(q.type==='judge'){
       if(e.key==='1'||e.key==='o'||e.key==='O'){pJudge(null,'正确');e.preventDefault();return}
       if(e.key==='2'||e.key==='x'||e.key==='X'){pJudge(null,'错误');e.preventDefault();return}
+    }else if(q.type==='choice'){
+      const n=parseInt(e.key,10);
+      if(n>=1&&n<=q.options.length){pJudge(null,q.options[n-1].text);e.preventDefault();return}
     }else{
       if(e.key==='Enter'||e.key===' '){pHsub();e.preventDefault();return}
       const n=parseInt(e.key,10);
