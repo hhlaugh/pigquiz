@@ -232,6 +232,15 @@ label.f{font-size:13px;color:var(--mut)}
 .pig .eye{position:absolute;top:44px;width:11px;height:14px;background:#3a2b32;border-radius:50%;z-index:2;animation:blink 4.2s infinite}
 .pig .eye.l{left:27px}.pig .eye.r{right:27px}
 @keyframes blink{0%,91%,100%{transform:scaleY(1)}95%{transform:scaleY(.08)}}
+/* 小猪互动：点击 wink（单眼臦）+ 开心弹跳 + 飘出爱心 */
+.pig{cursor:pointer}
+.heropig .pig{pointer-events:auto}
+.pig .eye.winking{animation:pigwink .6s ease}
+@keyframes pigwink{0%,100%{transform:scaleY(1)}30%{transform:scaleY(.06)}65%{transform:scaleY(1)}}
+.heropig .pig.winking,.pigwrap .pig.winking{animation:pigjoy .6s ease}
+@keyframes pigjoy{0%,100%{transform:translateY(0) rotate(0)}30%{transform:translateY(-6px) rotate(-4deg)}65%{transform:translateY(0) rotate(2deg)}}
+.pigheart{position:fixed;z-index:600;pointer-events:none;font-size:17px;animation:pigfloat .9s ease forwards}
+@keyframes pigfloat{0%{transform:translateY(4px) scale(.5);opacity:0}25%{opacity:1}100%{transform:translateY(-48px) scale(1.3);opacity:0}}
 .pig .blush{position:absolute;top:62px;width:17px;height:9px;background:#fbc4d8;border-radius:50%;z-index:2}
 .pig .blush.l{left:12px}.pig .blush.r{right:12px}
 .pig .snout{position:absolute;left:50%;transform:translateX(-50%);top:56px;width:46px;height:32px;background:#ef7fa5;border-radius:50%;z-index:2}
@@ -1006,7 +1015,24 @@ function checkin(){
 function totalCheckinDays(){let n=0;Object.keys(dailyRec).forEach(function(k){const r=dailyRec[k];if(r&&r.sets&&r.sets.reduce(function(a,b){return a+b.done},0)>0)n++});return n}
 function longestStreak(){const ks=Object.keys(dailyRec).filter(function(k){const r=dailyRec[k];return r&&r.sets&&r.sets.reduce(function(a,b){return a+b.done},0)>0}).sort();let best=0,cur=0,prev=null;ks.forEach(function(k){if(prev&&addDaysStr(prev,1)===k)cur++;else cur=1;best=Math.max(best,cur);prev=k});return best}
 function monthDoneDays(y,m){let done=0,full=0;const days=new Date(y,m+1,0).getDate();const g=Math.min(settings.goal,BANK.questions.length);for(let d=1;d<=days;d++){const r=dailyRec[y+'-'+pad(m+1)+'-'+pad(d)];const c=r?r.sets.reduce(function(a,b){return a+b.done},0):0;if(c>0)done++;if(g>0&&c>=g)full++}return {done:done,full:full}}
-function pigHTML(){return '<div class="pig"><div class="ear l"></div><div class="ear r"></div><div class="head"></div><div class="eye l"></div><div class="eye r"></div><div class="blush l"></div><div class="blush r"></div><div class="snout"><div class="nose l"></div><div class="nose r"></div></div></div>'}
+function pigHTML(){return '<div class="pig" data-act="pig-wink" role="button" aria-label="小猪（点我会眨眼哦）"><div class="ear l"></div><div class="ear r"></div><div class="head"></div><div class="eye l"></div><div class="eye r"></div><div class="blush l"></div><div class="blush r"></div><div class="snout"><div class="nose l"></div><div class="nose r"></div></div></div>'}
+function pigWink(p){
+  if(!p||p.dataset.winking)return;
+  p.dataset.winking='1';
+  const eyes=p.querySelectorAll('.eye');
+  const eye=eyes.length?eyes[Math.random()<.5?0:eyes.length-1]:null;
+  if(eye)eye.classList.add('winking');
+  p.classList.add('winking');
+  const r=p.getBoundingClientRect();
+  const heart=document.createElement('span');
+  heart.className='pigheart';
+  heart.textContent=['💗','✨','💖'][Math.floor(Math.random()*3)];
+  heart.style.left=Math.round(r.left+r.width*(.25+Math.random()*.5))+'px';
+  heart.style.top=Math.round(r.top-4)+'px';
+  document.body.appendChild(heart);
+  setTimeout(function(){heart.remove()},950);
+  setTimeout(function(){if(eye)eye.classList.remove('winking');p.classList.remove('winking');delete p.dataset.winking},650);
+}
 function showCelebration(){
   const emos=['🌸','💗','🐽','✨'];
   let falls='';
@@ -1780,6 +1806,7 @@ document.addEventListener('click',e=>{
     case 'go-wrong':go('wrong');break;
     case 'go-bank':go('bank');break;
     case 'daily-begin':dailyStart();break;
+    case 'pig-wink':pigWink(el.closest('.pig'));break;
     case 'daily-extra':PS=null;dailyExtra();break;
     case 'p-start':PS=null;pStart({src:$('#p-src').value,typ:$('#p-typ').value,form:$('#p-form').value,range:$('#p-range').value,count:parseInt($('#p-count').value,10)});break;
     case 'p-again':{const m=PS?PS.mode:null;const f=PS?PS.filters:null;PS=null;if(m==='wrong')wStart();else if(m==='srs')srsStart();else if(f&&f.range!=='wrong')pStart(f);else go('practice');break}
