@@ -1521,7 +1521,7 @@ function srsStart(early){
   if(!qs.length){toast(early?'没有安排中的题目':'今天没有待复习的题目 🎉');return}
   if(!early)randShuffle(qs);
   PS={mode:'srs',early:!!early,qs:qs,idx:0,locked:false,v:null,arr:null,grades:null,ok:0,n:0,startTs:Date.now(),filters:null,fromWrong:false,dailyIdx:null};
-  render();
+  go('srs');
 }
 function issueToggle(qid){
   if(issues[qid]){delete issues[qid];saveIssues();toast('已取消纠错标记');render();return}
